@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Support Desk - Gestion des tickets</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <span class="logo">SD</span>
+          <div>
+            <h1>Support Desk</h1>
+            <p class="subtitle">Gestion des tickets - API metier FastAPI</p>
+          </div>
+        </div>
+        <div class="arch">
+          <span class="arch-layer">Frontend (web)</span>
+          <span class="arrow">&#8594;</span>
+          <span class="arch-layer">API FastAPI</span>
+          <span class="arrow">&#8594;</span>
+          <span class="arch-layer">JSON</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="stats" id="stats">
+        <div class="stat-card"><span class="stat-value" id="stat-total">-</span><span class="stat-label">Total</span></div>
+        <div class="stat-card open"><span class="stat-value" id="stat-open">-</span><span class="stat-label">Ouverts</span></div>
+        <div class="stat-card in-progress"><span class="stat-value" id="stat-inprogress">-</span><span class="stat-label">En cours</span></div>
+        <div class="stat-card closed"><span class="stat-value" id="stat-closed">-</span><span class="stat-label">Fermes</span></div>
+        <div class="stat-card neutral"><span class="stat-value" id="stat-high">-</span><span class="stat-label">Haute priorite</span></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-toolbar">
+          <div class="filters">
+            <label>Statut
+              <select id="filter-status">
+                <option value="">Tous</option>
+                <option value="open">Open</option>
+                <option value="in_progress">In progress</option>
+                <option value="closed">Closed</option>
+              </select>
+            </label>
+            <label>Priorite
+              <select id="filter-priority">
+                <option value="">Toutes</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <input id="search" type="search" placeholder="Rechercher un ticket..." autocomplete="off">
+          </div>
+          <div class="actions">
+            <button class="btn-ghost" id="btn-refresh" title="Rafraichir">Actualiser</button>
+            <button class="btn-primary" id="btn-new">+ Nouveau ticket</button>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Titre</th>
+                <th>Statut</th>
+                <th>Priorite</th>
+                <th>Assignee</th>
+                <th>Cree le</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="tbody">
+              <tr><td colspan="7" class="muted">Chargement...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <!-- Modal : creation / edition -->
+    <div class="modal-overlay hidden" id="modal">
+      <div class="modal">
+        <div class="modal-header">
+          <h2 id="modal-title">Nouveau ticket</h2>
+          <button class="modal-close" id="modal-close" title="Fermer">&times;</button>
+        </div>
+        <form id="ticket-form" novalidate>
+          <input type="hidden" id="field-id">
+          <label>Titre *
+            <input id="field-title" type="text" required minlength="3" maxlength="200" placeholder="Ex. Camera HS etage 2">
+          </label>
+          <label>Description
+            <textarea id="field-description" maxlength="2000" rows="3" placeholder="Details du probleme..."></textarea>
+          </label>
+          <div class="row">
+            <label>Priorite
+              <select id="field-priority">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label>Statut
+              <select id="field-status">
+                <option value="open">Open</option>
+                <option value="in_progress">In progress</option>
+                <option value="closed">Closed</option>
+              </select>
+            </label>
+            <label>Assignee
+              <input id="field-assignee" type="text" maxlength="100" placeholder="nom-equipe">
+            </label>
+          </div>
+          <div class="row error-box hidden" id="form-error"></div>
+          <div class="modal-footer">
+            <button type="button" class="btn-ghost" id="btn-cancel">Annuler</button>
+            <button type="submit" class="btn-primary" id="btn-save">Enregistrer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast hidden" id="toast"></div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
