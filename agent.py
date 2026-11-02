@@ -60,7 +60,7 @@ async def run_with_anthropic(session, tools, query: str) -> str:
 
     messages: list[dict] = [{"role": "user", "content": query}]
     tool_schemas = [
-        {"name": t.name, "description": t.description, "input_schema": t.inputSchema}
+        {"name": t.name, "description": t.description, "input_schema": t.input_schema}
         for t in tools
     ]
 
@@ -109,7 +109,7 @@ async def run_with_openai(session, tools, query: str) -> str:
             "function": {
                 "name": t.name,
                 "description": t.description,
-                "parameters": t.inputSchema,
+                "parameters": t.input_schema,
             },
         }
         for t in tools
