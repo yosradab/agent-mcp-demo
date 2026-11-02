@@ -1,8 +1,9 @@
-mcp>=1.9.0
+# Le code utilise l'API MCP SDK v2 (MCPServer). La v1 (FastMCP) n'est pas compatible.
+mcp>=2.0,<3
 httpx>=0.28
 fastapi>=0.115
 uvicorn>=0.32
 pydantic>=2.7
-# Optionnel : pour le mode agent avec un vrai LLM (retenez celui que vous voulez)
+# LLM : installez celui que vous utilisez
 anthropic>=0.40
-# openai>=2.0
+# openai>=1.40

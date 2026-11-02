@@ -10,10 +10,14 @@ if (Test-Path ".\.venv\Scripts\python.exe") { $Python = ".\.venv\Scripts\python.
 
 Write-Host "[1/3] Demarrage de l'API metier (FastAPI sur http://127.0.0.1:8000) ..."
 $api = Start-Process -FilePath $Python -ArgumentList "api_server.py" -PassThru -WindowStyle Hidden
-Start-Sleep -Seconds 2
 
 try {
-    $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -TimeoutSec 5
+    # Attend que l'API reponde (max ~10s) au lieu d'un sleep fixe
+    $health = $null
+    for ($i = 0; $i -lt 20 -and -not $health; $i++) {
+        try { $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -TimeoutSec 1 } catch { Start-Sleep -Milliseconds 500 }
+    }
+    if (-not $health) { throw "L'API n'a pas demarre sur http://127.0.0.1:8000" }
     Write-Host "[1/3] OK -> $($health.service) status=$($health.status)"
 
     Write-Host "[2/3] Lancement du serveur MCP + agent ..."

@@ -6,7 +6,9 @@ serveur MCP, qui fait le lien.
 """
 
 import json
+import os
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,10 +17,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-DATA_DIR = Path(__file__).parent / "data"
-DATA_FILE = DATA_DIR / "tickets.json"
-STATIC_DIR = Path(__file__).parent / "static"
-LOCK = threading.Lock()
+BASE_DIR = Path(__file__).parent
+DATA_FILE = Path(os.getenv("TICKETS_FILE", BASE_DIR / "data" / "tickets.json"))
+STATIC_DIR = BASE_DIR / "static"
+# RLock : une transaction (lecture -> modification -> ecriture) garde le verrou
+# de bout en bout, sinon deux creations simultanees pourraient obtenir le meme id.
+LOCK = threading.RLock()
+UNASSIGNED = "non-assigne"
 
 SEED_TICKETS = [
     {
@@ -54,14 +59,26 @@ SEED_TICKETS = [
 def _load_tickets() -> list[dict]:
     with LOCK:
         if not DATA_FILE.exists():
-            DATA_DIR.mkdir(parents=True, exist_ok=True)
-            DATA_FILE.write_text(json.dumps(SEED_TICKETS, indent=2), encoding="utf-8")
+            DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _save_tickets(SEED_TICKETS)
         return json.loads(DATA_FILE.read_text(encoding="utf-8"))
 
 
 def _save_tickets(tickets: list[dict]) -> None:
+    """Ecriture atomique : fichier temporaire puis remplacement (pas de JSON corrompu)."""
     with LOCK:
-        DATA_FILE.write_text(json.dumps(tickets, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp = DATA_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(tickets, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(DATA_FILE)
+
+
+@contextmanager
+def _transaction():
+    """Charge les tickets, laisse l'appelant les modifier, puis sauvegarde sous verrou."""
+    with LOCK:
+        tickets = _load_tickets()
+        yield tickets
+        _save_tickets(tickets)
 
 
 class TicketCreate(BaseModel):
@@ -72,12 +89,14 @@ class TicketCreate(BaseModel):
 
 
 class TicketUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=3, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
     status: str | None = Field(default=None, pattern="^(open|in_progress|closed)$")
     priority: str | None = Field(default=None, pattern="^(low|medium|high)$")
     assignee: str | None = Field(default=None, max_length=100)
 
 
-app = FastAPI(title="Tickets API", version="1.0.0")
+app = FastAPI(title="Tickets API", version="1.1.0")
 
 
 @app.get("/health")
@@ -118,45 +137,45 @@ def get_ticket(ticket_id: int) -> dict:
     raise HTTPException(status_code=404, detail="Ticket introuvable")
 
 
-@app.post("/api/tickets")
+@app.post("/api/tickets", status_code=201)
 def create_ticket(payload: TicketCreate) -> dict:
-    tickets = _load_tickets()
-    new_id = max((t["id"] for t in tickets), default=0) + 1
-    ticket = {
-        "id": new_id,
-        "title": payload.title,
-        "description": payload.description,
-        "status": "open",
-        "priority": payload.priority,
-        "assignee": payload.assignee or "non-assigne",
-        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-    }
-    tickets.append(ticket)
-    _save_tickets(tickets)
+    with _transaction() as tickets:
+        new_id = max((t["id"] for t in tickets), default=0) + 1
+        ticket = {
+            "id": new_id,
+            "title": payload.title.strip(),
+            "description": payload.description.strip(),
+            "status": "open",
+            "priority": payload.priority,
+            "assignee": (payload.assignee or "").strip() or UNASSIGNED,
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        tickets.append(ticket)
     return ticket
 
 
 @app.patch("/api/tickets/{ticket_id}")
 def update_ticket(ticket_id: int, payload: TicketUpdate) -> dict:
-    """Met a jour le statut / la priorite / l'assignee d'un ticket."""
-    tickets = _load_tickets()
-    for ticket in tickets:
-        if ticket["id"] == ticket_id:
-            changes = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
-            ticket.update(changes)
-            _save_tickets(tickets)
-            return ticket
+    """Met a jour le titre / la description / le statut / la priorite / l'assignee d'un ticket."""
+    changes = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    if "assignee" in changes:
+        changes["assignee"] = changes["assignee"].strip() or UNASSIGNED
+    with _transaction() as tickets:
+        for ticket in tickets:
+            if ticket["id"] == ticket_id:
+                ticket.update(changes)
+                ticket["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                return ticket
     raise HTTPException(status_code=404, detail="Ticket introuvable")
 
 
 @app.delete("/api/tickets/{ticket_id}")
 def delete_ticket(ticket_id: int) -> dict:
-    tickets = _load_tickets()
-    for i, ticket in enumerate(tickets):
-        if ticket["id"] == ticket_id:
-            removed = tickets.pop(i)
-            _save_tickets(tickets)
-            return {"deleted": removed["id"]}
+    with _transaction() as tickets:
+        for i, ticket in enumerate(tickets):
+            if ticket["id"] == ticket_id:
+                tickets.pop(i)
+                return {"deleted": ticket_id}
     raise HTTPException(status_code=404, detail="Ticket introuvable")
 
 
@@ -174,4 +193,4 @@ def ticket_stats() -> dict:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host=os.getenv("API_HOST", "127.0.0.1"), port=int(os.getenv("API_PORT", "8000")))

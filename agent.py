@@ -16,6 +16,7 @@ import json
 import os
 import sys
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
@@ -25,7 +26,23 @@ ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-MAX_STEPS = 8
+MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "8"))
+MCP_SERVER_SCRIPT = Path(__file__).parent / "mcp_server.py"
+
+
+def system_prompt() -> str:
+    return (
+        "Tu es un assistant metier specialise dans la gestion de tickets.\n"
+        "Tu as acces a des outils MCP qui parlent a l'API tickets.\n"
+        "Reponds en francais, de facon concise, et base-toi uniquement sur "
+        "les resultats des outils.\n"
+        f"Date du jour : {date.today().isoformat()}."
+    )
+
+
+def short(text: str | None) -> str:
+    """Premiere ligne d'une description d'outil (les docstrings contiennent aussi les Args)."""
+    return (text or "").strip().splitlines()[0] if text else ""
 
 
 def format_tool_result(result: Any) -> str:
@@ -41,13 +58,6 @@ async def run_with_anthropic(session, tools, query: str) -> str:
 
     client = anthropic.Anthropic()
 
-    system_prompt = (
-        "Tu es un assistant metier specialise dans la gestion de tickets.\n"
-        "Tu as acces a des outils MCP qui parlent a l'API tickets.\n"
-        "Reponds en francais, de facon concise, et base-toi uniquement sur "
-        "les resultats des outils.\n"
-        f"Date du jour : {date.today().isoformat()}."
-    )
     messages: list[dict] = [{"role": "user", "content": query}]
     tool_schemas = [
         {"name": t.name, "description": t.description, "input_schema": t.inputSchema}
@@ -58,7 +68,7 @@ async def run_with_anthropic(session, tools, query: str) -> str:
         resp = client.messages.create(
             model=ANTHROPIC_MODEL,
             max_tokens=1024,
-            system=system_prompt,
+            system=system_prompt(),
             tools=tool_schemas,
             messages=messages,
         )
@@ -79,6 +89,7 @@ async def run_with_anthropic(session, tools, query: str) -> str:
                     "type": "tool_result",
                     "tool_use_id": block.id,
                     "content": rendered[:2000],
+                    "is_error": bool(getattr(result, "isError", False)),
                 }
             )
         messages.append({"role": "user", "content": tool_results})
@@ -91,14 +102,7 @@ async def run_with_openai(session, tools, query: str) -> str:
 
     client = OpenAI()
 
-    system_prompt = (
-        "Tu es un assistant metier specialise dans la gestion de tickets.\n"
-        "Tu as acces a des outils MCP qui parlent a l'API tickets.\n"
-        "Reponds en francais, de facon concise, et base-toi uniquement sur "
-        "les resultats des outils.\n"
-        f"Date du jour : {date.today().isoformat()}."
-    )
-    messages: list[dict] = [{"role": "system", "content": system_prompt}, {"role": "user", "content": query}]
+    messages: list[dict] = [{"role": "system", "content": system_prompt()}, {"role": "user", "content": query}]
     tool_schemas = [
         {
             "type": "function",
@@ -119,13 +123,17 @@ async def run_with_openai(session, tools, query: str) -> str:
             tool_choice="auto",
         )
         msg = resp.choices[0].message
-        messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": msg.tool_calls})
+        # model_dump : le SDK attend des dicts serialisables (et pas de "tool_calls": None)
+        messages.append(msg.model_dump(exclude_none=True))
         if not msg.tool_calls:
             return msg.content or "(absence de reponse)"
 
         for call in msg.tool_calls:
             print(f"  [agent -> tool] {call.function.name}({call.function.arguments})")
-            args = json.loads(call.function.arguments or "{}")
+            try:
+                args = json.loads(call.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
             result = await session.call_tool(call.function.name, args)
             rendered = format_tool_result(result)
             print(f"  [tool -> agent] {rendered[:300]}")
@@ -143,7 +151,7 @@ async def run_with_openai(session, tools, query: str) -> str:
 async def interactive_loop(session, tools) -> None:
     print("\nMode interactif (aucune cle API detectee). Outils disponibles :")
     for i, t in enumerate(tools, start=1):
-        print(f"  {i}. {t.name} - {t.description}")
+        print(f"  {i}. {t.name} - {short(t.description)}")
     print("  q. Quitter\n")
 
     while True:
@@ -167,15 +175,19 @@ async def interactive_loop(session, tools) -> None:
         except EOFError:
             print("(fin de saisie)")
             break
-        args = json.loads(raw) if raw else {}
-        result = await session.call_tool(tool.name, args or None)
+        try:
+            args = json.loads(raw) if raw else {}
+        except json.JSONDecodeError as exc:
+            print(f"JSON invalide : {exc}\n")
+            continue
+        result = await session.call_tool(tool.name, args)
         print("\nResultat :")
         print(format_tool_result(result)[:1000])
         print()
 
 
 async def main() -> None:
-    query = ""
+    query: str | None = ""
     if len(sys.argv) > 1:
         query = " ".join(sys.argv[1:])
     elif not ANTHROPIC_KEY and not OPENAI_KEY:
@@ -183,7 +195,7 @@ async def main() -> None:
     else:
         query = input("Votre demande pour l'agent : ").strip()
 
-    server = StdioServerParameters(command=sys.executable, args=["mcp_server.py"])
+    server = StdioServerParameters(command=sys.executable, args=[str(MCP_SERVER_SCRIPT)], env=dict(os.environ))
     async with stdio_client(server) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -191,7 +203,7 @@ async def main() -> None:
             tools = tools_result.tools
             print(f"Connecte au serveur MCP - {len(tools)} outils disponibles.")
             for t in tools:
-                print(f"  - {t.name}: {t.description}")
+                print(f"  - {t.name}: {short(t.description)}")
 
             if query is None:
                 await interactive_loop(session, tools)

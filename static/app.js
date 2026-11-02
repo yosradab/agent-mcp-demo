@@ -123,6 +123,9 @@ function openModal(ticket = null) {
   $("field-description").value = ticket ? (ticket.description || "") : "";
   $("field-priority").value = ticket ? ticket.priority : "medium";
   $("field-status").value = ticket ? ticket.status : "open";
+  // A la creation, le statut est toujours "open" cote API : on masque le champ.
+  $("field-status").disabled = !ticket;
+  $("field-status-wrap").classList.toggle("hidden", !ticket);
   $("field-assignee").value = ticket ? (ticket.assignee || "") : "";
   $("form-error").classList.add("hidden");
   $("modal").classList.remove("hidden");
@@ -149,7 +152,7 @@ async function onFormSubmit(event) {
     title,
     description: $("field-description").value.trim(),
     priority: $("field-priority").value,
-    status: $("field-status").value,
+    ...(id ? { status: $("field-status").value } : {}),
     assignee: $("field-assignee").value.trim(),
   };
 
@@ -157,7 +160,7 @@ async function onFormSubmit(event) {
     if (id) {
       await api(`/api/tickets/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ status: payload.status, priority: payload.priority, assignee: payload.assignee }),
+        body: JSON.stringify(payload),
       });
       toast("Ticket #" + id + " mis a jour.");
     } else {
