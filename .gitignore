@@ -17,3 +17,4 @@ data/*.tmp
 .vscode/
 .idea/
 api.log
+api.err.log
