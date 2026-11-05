@@ -1,69 +1,69 @@
 # agent-mcp-demo
 
-A minimal, end-to-end demo of an **AI agent that operates a business API through the Model Context Protocol (MCP)**.
+Démo complète et minimale d'un **agent IA qui pilote une API métier via le Model Context Protocol (MCP)**.
 
-A support-ticket backend (FastAPI) is exposed to an LLM agent (Claude or GPT) as MCP **tools**. The agent never sees the HTTP API: it only knows tool names, descriptions and JSON schemas, and decides on its own which tools to call to answer a natural-language request.
+Un backend de tickets de support (FastAPI) est exposé à un agent LLM (Claude ou GPT) sous forme d'**outils MCP**. L'agent ne voit jamais l'API HTTP : il connaît seulement le nom des outils, leur description et leur schéma JSON, et choisit lui-même quels outils appeler pour répondre à une demande en langage naturel.
 
 ```
- "Close every high-priority ticket assigned to technicien-1"
+ "Ferme tous les tickets haute priorité assignés à technicien-1"
                         │
                         ▼
 ┌──────────────┐  stdio / MCP   ┌──────────────┐   HTTP/JSON   ┌──────────────┐
 │   agent.py   │ ─────────────▶ │ mcp_server.py│ ────────────▶ │ api_server.py│ ──▶ data/tickets.json
-│ LLM tool-use │ ◀───────────── │  MCP tools   │ ◀──────────── │   FastAPI    │
+│ LLM tool-use │ ◀───────────── │  outils MCP  │ ◀──────────── │   FastAPI    │
 └──────────────┘                └──────────────┘               └──────┬───────┘
                                                                       │
-                                                         static/ web UI (humans)
+                                                        static/ interface web (humains)
 ```
 
-| Layer | File | Role |
+| Couche | Fichier | Rôle |
 |---|---|---|
-| Business API | `api_server.py` | FastAPI CRUD + stats on tickets, JSON file storage, validation, web UI at `/` |
-| MCP server | `mcp_server.py` | Wraps the API as 5 MCP tools, turns HTTP errors into readable tool errors |
-| Agent | `agent.py` | Spawns the MCP server over stdio, runs an LLM tool-calling loop (Anthropic or OpenAI) |
-| Web UI | `static/` | "Support Desk" dashboard for humans: stats, filters, search, create/edit/delete |
+| API métier | `api_server.py` | CRUD FastAPI + statistiques sur les tickets, stockage JSON, validation, interface web sur `/` |
+| Serveur MCP | `mcp_server.py` | Expose l'API sous forme de 5 outils MCP et transforme les erreurs HTTP en erreurs d'outil lisibles |
+| Agent | `agent.py` | Lance le serveur MCP en stdio et exécute une boucle d'appels d'outils avec le LLM (Anthropic ou OpenAI) |
+| Interface web | `static/` | Tableau de bord « Support Desk » pour les humains : stats, filtres, recherche, création, édition, suppression |
 
-## MCP tools
+## Outils MCP
 
-| Tool | What it does |
+| Outil | Rôle |
 |---|---|
-| `list_tickets(status?, priority?, limit=20)` | List tickets, optionally filtered |
-| `get_ticket(ticket_id)` | Full detail of one ticket |
-| `create_ticket(title, description?, priority?, assignee?)` | Create a ticket (status `open`) |
-| `update_ticket(ticket_id, status?, priority?, assignee?)` | Close, reassign or re-prioritise a ticket |
-| `ticket_stats()` | Totals by status and priority |
+| `list_tickets(status?, priority?, limit=20)` | Liste les tickets, avec filtres optionnels |
+| `get_ticket(ticket_id)` | Détail complet d'un ticket |
+| `create_ticket(title, description?, priority?, assignee?)` | Crée un ticket (statut `open`) |
+| `update_ticket(ticket_id, status?, priority?, assignee?)` | Ferme, réassigne ou change la priorité d'un ticket |
+| `ticket_stats()` | Totaux par statut et par priorité |
 
-`status` ∈ `open | in_progress | closed`, `priority` ∈ `low | medium | high` — enforced as enums in the tool schemas, so the LLM sees the allowed values.
+`status` ∈ `open | in_progress | closed` et `priority` ∈ `low | medium | high` sont déclarés comme enums dans les schémas des outils : le LLM voit les valeurs autorisées.
 
-Deletion is intentionally **not** exposed to the agent: destructive actions stay human-only, via the web UI.
+La suppression n'est volontairement **pas** exposée à l'agent : les actions destructives restent réservées aux humains, via l'interface web.
 
-## Quick start
+## Démarrage rapide
 
-Requires **Python 3.10+**.
+Prérequis : **Python 3.10+**.
 
 ```bash
 git clone https://github.com/yosradab/agent-mcp-demo.git
 cd agent-mcp-demo
 python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+source .venv/bin/activate          # Windows : .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 1. Run with an LLM agent
+### 1. Avec un agent LLM
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY=sk-... (pip install openai)
+export ANTHROPIC_API_KEY=sk-ant-...   # ou OPENAI_API_KEY=sk-... (pip install openai)
 ./run.sh "Quels tickets haute priorité sont encore ouverts ?"
 ```
 
-Windows (PowerShell):
+Windows (PowerShell) :
 
 ```powershell
 $env:ANTHROPIC_API_KEY = "sk-ant-..."
 .\run.ps1 "Crée un ticket : caméra HS au 2e étage, priorité haute"
 ```
 
-The script starts the API, waits for `/health`, then launches the agent (which itself starts the MCP server). Each tool call is printed, so you can watch the agent reason:
+Le script démarre l'API, attend `/health`, puis lance l'agent (qui démarre lui-même le serveur MCP). Chaque appel d'outil est affiché, ce qui permet de suivre le raisonnement de l'agent :
 
 ```
 Connecte au serveur MCP - 5 outils disponibles.
@@ -74,9 +74,9 @@ Connecte au serveur MCP - 5 outils disponibles.
 1 ticket haute priorité est ouvert : #1 « NVR ne répond plus après coupure de courant » (technicien-1).
 ```
 
-### 2. Run without an API key
+### 2. Sans clé API
 
-`./run.sh` with no key opens an **interactive mode**: pick a tool by number and pass JSON arguments yourself — handy for testing the MCP layer.
+Sans clé, `./run.sh` ouvre un **mode interactif** : on choisit un outil par son numéro et on passe soi-même les arguments JSON. Pratique pour tester la couche MCP.
 
 ```
 Choisissez un outil (numero, 'q' pour quitter) : 4
@@ -84,58 +84,58 @@ Entrez l'argument JSON (update_ticket) ou Entree pour aucun :
 > {"ticket_id": 1, "status": "closed"}
 ```
 
-### 3. Web UI
+### 3. Interface web
 
 ```bash
 python api_server.py
 ```
 
-- Dashboard: http://127.0.0.1:8000
-- OpenAPI docs: http://127.0.0.1:8000/docs
+- Tableau de bord : http://127.0.0.1:8000
+- Documentation OpenAPI : http://127.0.0.1:8000/docs
 
-Changes made by the agent show up in the UI after **Actualiser** — both sides share the same API.
+Les modifications faites par l'agent apparaissent dans l'interface après **Actualiser** : les deux passent par la même API.
 
-### 4. Use the MCP server from Claude Desktop (or any MCP client)
+### 4. Depuis Claude Desktop (ou tout client MCP)
 
-Start the API (`python api_server.py`), then add to your client's MCP config:
+Démarrer l'API (`python api_server.py`), puis ajouter dans la configuration MCP du client :
 
 ```json
 {
   "mcpServers": {
     "tickets": {
-      "command": "/absolute/path/to/.venv/bin/python",
-      "args": ["/absolute/path/to/agent-mcp-demo/mcp_server.py"],
+      "command": "/chemin/absolu/vers/.venv/bin/python",
+      "args": ["/chemin/absolu/vers/agent-mcp-demo/mcp_server.py"],
       "env": { "API_BASE": "http://127.0.0.1:8000" }
     }
   }
 }
 ```
 
-Self-check of the MCP → API link without any agent: `python mcp_server.py --selftest`.
+Pour vérifier le lien MCP → API sans agent : `python mcp_server.py --selftest`.
 
 ## Configuration
 
-All optional — see `.env.example`.
+Tout est optionnel, voir `.env.example`.
 
-| Variable | Default | Used by |
+| Variable | Défaut | Utilisée par |
 |---|---|---|
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | – | agent (Anthropic takes precedence) |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | – | agent (Anthropic est prioritaire) |
 | `ANTHROPIC_MODEL` / `OPENAI_MODEL` | `claude-sonnet-4-5` / `gpt-4o-mini` | agent |
-| `AGENT_MAX_STEPS` | `8` | agent — max tool-calling iterations |
-| `API_BASE` | `http://127.0.0.1:8000` | MCP server |
-| `API_TIMEOUT` | `10` | MCP server (seconds) |
+| `AGENT_MAX_STEPS` | `8` | agent : nombre max d'itérations d'appels d'outils |
+| `API_BASE` | `http://127.0.0.1:8000` | serveur MCP |
+| `API_TIMEOUT` | `10` | serveur MCP (secondes) |
 | `API_HOST` / `API_PORT` | `127.0.0.1` / `8000` | API |
-| `TICKETS_FILE` | `data/tickets.json` | API — auto-created with 3 seed tickets |
+| `TICKETS_FILE` | `data/tickets.json` | API : créé automatiquement avec 3 tickets d'exemple |
 
-## REST API
+## API REST
 
-| Method | Route | Body |
+| Méthode | Route | Corps |
 |---|---|---|
 | `GET` | `/health` | – |
 | `GET` | `/api/tickets?status=&priority=&limit=` | – |
 | `GET` | `/api/tickets/{id}` | – |
 | `POST` | `/api/tickets` → `201` | `{title, description?, priority?, assignee?}` |
-| `PATCH` | `/api/tickets/{id}` | any of `{title, description, status, priority, assignee}` |
+| `PATCH` | `/api/tickets/{id}` | n'importe quel champ parmi `{title, description, status, priority, assignee}` |
 | `DELETE` | `/api/tickets/{id}` | – |
 | `GET` | `/api/tickets/stats/summary` | – |
 
@@ -146,19 +146,19 @@ pip install -r requirements-dev.txt
 pytest -q
 ```
 
-Covers CRUD, validation, filters, stats and concurrent creation (unique IDs under parallel requests).
+Couvre le CRUD, la validation, les filtres, les statistiques et la création concurrente (identifiants uniques sous requêtes parallèles).
 
-## Design notes
+## Choix de conception
 
-- **Separation of concerns** — the agent only talks MCP; the MCP server only talks HTTP; only the API touches data. Swapping the JSON file for a real database changes nothing above the API.
-- **Errors the LLM can act on** — API errors are re-raised as MCP `ToolError` (`HTTP 404 : Ticket introuvable`) and flagged `is_error` to the model, so it can correct itself instead of failing blindly.
-- **Safe persistence** — writes are atomic (temp file + rename) and each read-modify-write runs under a single lock.
-- **Provider-agnostic agent** — the same MCP tool list is mapped to Anthropic `tools` or OpenAI `functions`.
+- **Séparation des responsabilités** : l'agent ne parle que MCP, le serveur MCP ne parle que HTTP, et seule l'API touche aux données. Remplacer le fichier JSON par une vraie base de données ne change rien au-dessus de l'API.
+- **Des erreurs exploitables par le LLM** : les erreurs de l'API sont relancées en `ToolError` MCP (`HTTP 404 : Ticket introuvable`) et signalées `is_error` au modèle, qui peut se corriger au lieu d'échouer à l'aveugle.
+- **Persistance sûre** : écritures atomiques (fichier temporaire + renommage) et chaque lecture-modification-écriture s'exécute sous un verrou unique.
+- **Agent indépendant du fournisseur** : la même liste d'outils MCP est convertie en `tools` Anthropic ou en `functions` OpenAI.
 
 ## Stack
 
-Python · [MCP Python SDK v2](https://github.com/modelcontextprotocol/python-sdk) · FastAPI · httpx · Pydantic · Anthropic / OpenAI SDKs · vanilla JS
+Python · [MCP Python SDK v2](https://github.com/modelcontextprotocol/python-sdk) · FastAPI · httpx · Pydantic · SDK Anthropic / OpenAI · JavaScript vanilla
 
-## Author
+## Auteur
 
-**Yosra Dab** — Full Stack Software Engineer · [Portfolio](https://yosradab.vercel.app) · [GitHub](https://github.com/yosradab) · [LinkedIn](https://linkedin.com/in/yosradab)
+**Yosra Dab** — Ingénieure logiciel Full Stack · [Portfolio](https://yosradab.vercel.app) · [GitHub](https://github.com/yosradab) · [LinkedIn](https://linkedin.com/in/yosradab)
