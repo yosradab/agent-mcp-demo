@@ -252,6 +252,44 @@ def _check_quota(ip: str) -> None:
         _DAILY["count"] += 1
 
 
+def _root_cause(exc: BaseException) -> BaseException:
+    """Deplie les ExceptionGroup (anyio / MCP) pour retrouver l'erreur d'origine."""
+    while isinstance(exc, BaseExceptionGroup) and exc.exceptions:
+        exc = exc.exceptions[0]
+    return exc
+
+
+def _redact(text: str) -> str:
+    """Retire toute chaine qui ressemble a une cle avant d'ecrire dans les logs."""
+    import re
+
+    for key in (os.getenv("ANTHROPIC_API_KEY"), os.getenv("OPENAI_API_KEY")):
+        if key:
+            text = text.replace(key, "[cle]")
+    return re.sub(r"sk-[A-Za-z0-9_-]{8,}", "[cle]", text)
+
+
+def _public_error(exc: BaseException) -> str:
+    """Message sur pour le navigateur : la categorie d'erreur, jamais son contenu brut."""
+    name = type(exc).__name__
+    msg = str(exc).lower()
+    if name == "AuthenticationError" or "invalid x-api-key" in msg or "incorrect api key" in msg:
+        return "Agent indisponible : la cle API configuree sur le serveur est refusee (cle invalide ou revoquee)."
+    if "credit balance" in msg or "insufficient_quota" in msg or "billing" in msg:
+        return "Agent indisponible : credit API insuffisant sur le compte du fournisseur."
+    if name == "NotFoundError" or "model" in msg and "not found" in msg:
+        return "Agent indisponible : le modele configure n'existe pas ou n'est pas accessible avec cette cle."
+    if name == "PermissionDeniedError":
+        return "Agent indisponible : cette cle n'a pas acces au modele demande."
+    if name in ("RateLimitError", "OverloadedError") or "overloaded" in msg:
+        return "Le fournisseur IA est sature pour le moment. Reessayez dans une minute."
+    if name in ("APIConnectionError", "APITimeoutError"):
+        return "Le serveur n'arrive pas a joindre le fournisseur IA. Reessayez plus tard."
+    if "mcp" in msg or name in ("McpError", "ConnectionError", "BrokenResourceError", "ClosedResourceError"):
+        return "Le serveur MCP n'a pas pu demarrer ou repondre."
+    return f"L'agent a rencontre une erreur ({name}). Reessayez plus tard."
+
+
 class AgentQuery(BaseModel):
     query: str = Field(..., min_length=3, max_length=AGENT_MAX_QUERY)
 
@@ -277,8 +315,9 @@ async def ask_agent(payload: AgentQuery, request: Request) -> dict:
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="L'agent a mis trop de temps a repondre.")
     except Exception as exc:  # jamais de details internes (ni de cle) vers le navigateur
-        print(f"[agent] erreur : {type(exc).__name__}", flush=True)
-        raise HTTPException(status_code=502, detail="L'agent a rencontre une erreur. Reessayez plus tard.")
+        root = _root_cause(exc)
+        print(f"[agent] erreur : {type(root).__name__}: {_redact(str(root))[:300]}", flush=True)
+        raise HTTPException(status_code=502, detail=_public_error(root))
     return {"answer": answer, "trace": [t.strip() for t in trace][:40]}
 
 

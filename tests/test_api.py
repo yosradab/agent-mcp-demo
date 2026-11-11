@@ -132,3 +132,18 @@ def test_agent_error_hides_details(agent_env, monkeypatch):
     monkeypatch.setattr(agent, "run_agent", boom)
     resp = agent_env.post("/api/agent", json={"query": "abc"})
     assert resp.status_code == 502 and "sk-ant" not in resp.text
+
+
+def test_agent_error_categories_never_leak_key(agent_env, monkeypatch):
+    import agent
+
+    class AuthenticationError(Exception):
+        pass
+
+    async def bad_key(query, log=print):
+        raise ExceptionGroup("tg", [AuthenticationError("invalid x-api-key test-key-not-real")])
+
+    monkeypatch.setattr(agent, "run_agent", bad_key)
+    resp = agent_env.post("/api/agent", json={"query": "abc"})
+    assert resp.status_code == 502
+    assert "cle API" in resp.json()["detail"] and "test-key-not-real" not in resp.text
