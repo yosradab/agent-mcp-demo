@@ -53,10 +53,21 @@ def format_tool_result(result: Any) -> str:
     return "\n".join(parts) if parts else "(vide)"
 
 
-async def run_with_anthropic(session, tools, query: str) -> str:
+def mcp_server_env() -> dict[str, str]:
+    """Environnement minimal du sous-processus MCP : il n'a besoin que de l'URL de l'API.
+
+    Les cles LLM (ANTHROPIC_API_KEY / OPENAI_API_KEY) ne lui sont jamais transmises :
+    seul l'agent parle au modele, le serveur MCP ne parle qu'a l'API metier.
+    """
+    keep = ("PATH", "HOME", "LANG", "LC_ALL", "PYTHONPATH", "VIRTUAL_ENV", "SYSTEMROOT", "TEMP", "TMP",
+            "API_BASE", "API_TIMEOUT")
+    return {k: v for k, v in os.environ.items() if k in keep}
+
+
+async def run_with_anthropic(session, tools, query: str, log=print) -> str:
     import anthropic
 
-    client = anthropic.Anthropic()
+    client = anthropic.AsyncAnthropic()
 
     messages: list[dict] = [{"role": "user", "content": query}]
     tool_schemas = [
@@ -65,7 +76,7 @@ async def run_with_anthropic(session, tools, query: str) -> str:
     ]
 
     for _ in range(MAX_STEPS):
-        resp = client.messages.create(
+        resp = await client.messages.create(
             model=ANTHROPIC_MODEL,
             max_tokens=1024,
             system=system_prompt(),
@@ -80,10 +91,10 @@ async def run_with_anthropic(session, tools, query: str) -> str:
 
         tool_results = []
         for block in tool_uses:
-            print(f"  [agent -> tool] {block.name}({block.input})")
+            log(f"  [agent -> tool] {block.name}({block.input})")
             result = await session.call_tool(block.name, block.input or {})
             rendered = format_tool_result(result)
-            print(f"  [tool -> agent] {rendered[:300]}")
+            log(f"  [tool -> agent] {rendered[:300]}")
             tool_results.append(
                 {
                     "type": "tool_result",
@@ -97,10 +108,10 @@ async def run_with_anthropic(session, tools, query: str) -> str:
     return "Nombre maximal d'etapes atteint sans reponse finale."
 
 
-async def run_with_openai(session, tools, query: str) -> str:
-    from openai import OpenAI
+async def run_with_openai(session, tools, query: str, log=print) -> str:
+    from openai import AsyncOpenAI
 
-    client = OpenAI()
+    client = AsyncOpenAI()
 
     messages: list[dict] = [{"role": "system", "content": system_prompt()}, {"role": "user", "content": query}]
     tool_schemas = [
@@ -116,7 +127,7 @@ async def run_with_openai(session, tools, query: str) -> str:
     ]
 
     for _ in range(MAX_STEPS):
-        resp = client.chat.completions.create(
+        resp = await client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=messages,
             tools=tool_schemas,
@@ -129,14 +140,14 @@ async def run_with_openai(session, tools, query: str) -> str:
             return msg.content or "(absence de reponse)"
 
         for call in msg.tool_calls:
-            print(f"  [agent -> tool] {call.function.name}({call.function.arguments})")
+            log(f"  [agent -> tool] {call.function.name}({call.function.arguments})")
             try:
                 args = json.loads(call.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
             result = await session.call_tool(call.function.name, args)
             rendered = format_tool_result(result)
-            print(f"  [tool -> agent] {rendered[:300]}")
+            log(f"  [tool -> agent] {rendered[:300]}")
             messages.append(
                 {
                     "role": "tool",
@@ -146,6 +157,20 @@ async def run_with_openai(session, tools, query: str) -> str:
             )
 
     return "Nombre maximal d'etapes atteint sans reponse finale."
+
+
+async def run_agent(query: str, log=print) -> str:
+    """Execute une demande de bout en bout (utilise par l'API web /api/agent)."""
+    if not (ANTHROPIC_KEY or OPENAI_KEY):
+        raise RuntimeError("Aucune cle LLM configuree.")
+    server = StdioServerParameters(command=sys.executable, args=[str(MCP_SERVER_SCRIPT)], env=mcp_server_env())
+    async with stdio_client(server) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools = (await session.list_tools()).tools
+            if ANTHROPIC_KEY:
+                return await run_with_anthropic(session, tools, query, log)
+            return await run_with_openai(session, tools, query, log)
 
 
 async def interactive_loop(session, tools) -> None:
@@ -195,7 +220,7 @@ async def main() -> None:
     else:
         query = input("Votre demande pour l'agent : ").strip()
 
-    server = StdioServerParameters(command=sys.executable, args=[str(MCP_SERVER_SCRIPT)], env=dict(os.environ))
+    server = StdioServerParameters(command=sys.executable, args=[str(MCP_SERVER_SCRIPT)], env=mcp_server_env())
     async with stdio_client(server) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()

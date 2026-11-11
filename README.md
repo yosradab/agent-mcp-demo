@@ -124,7 +124,10 @@ Tout est optionnel, voir `.env.example`.
 | `AGENT_MAX_STEPS` | `8` | agent : nombre max d'itérations d'appels d'outils |
 | `API_BASE` | `http://127.0.0.1:8000` | serveur MCP |
 | `API_TIMEOUT` | `10` | serveur MCP (secondes) |
-| `API_HOST` / `API_PORT` | `127.0.0.1` / `8000` | API |
+| `API_HOST` / `API_PORT` | `127.0.0.1` / `8000` | API (`PORT` de l'hébergeur prioritaire, écoute alors sur `0.0.0.0`) |
+| `AGENT_RATE_PER_IP` / `AGENT_RATE_WINDOW` | `5` / `600` | web : requêtes agent par IP et par fenêtre (secondes) |
+| `AGENT_DAILY_CAP` | `100` | web : plafond de requêtes agent par jour, tous visiteurs |
+| `AGENT_MAX_QUERY` / `AGENT_TIMEOUT` | `500` / `60` | web : longueur max d'une demande, délai max (secondes) |
 | `TICKETS_FILE` | `data/tickets.json` | API : créé automatiquement avec 3 tickets d'exemple |
 
 ## API REST
@@ -138,6 +141,28 @@ Tout est optionnel, voir `.env.example`.
 | `PATCH` | `/api/tickets/{id}` | n'importe quel champ parmi `{title, description, status, priority, assignee}` |
 | `DELETE` | `/api/tickets/{id}` | – |
 | `GET` | `/api/tickets/stats/summary` | – |
+| `GET` | `/api/agent/status` | – (l'agent est-il activé ?) |
+| `POST` | `/api/agent` | `{query}` → `{answer, trace}` (limité, voir Déploiement) |
+
+## Déploiement (Render)
+
+Le repo contient un `Dockerfile` et un blueprint `render.yaml` : l'API, le frontend et l'agent tournent dans un seul service.
+
+1. Sur [render.com](https://render.com) : **New → Blueprint**, choisissez ce repo.
+2. Render demande `ANTHROPIC_API_KEY` : collez votre clé **dans Render uniquement**. Pour utiliser GPT à la place, ajoutez `OPENAI_API_KEY` dans *Environment* et décommentez `openai` dans `requirements.txt`.
+3. Déployez. L'URL publique affiche le Support Desk avec le panneau « Demandez à l'agent IA ».
+
+Sans clé, le site fonctionne quand même : seul le panneau agent est désactivé.
+
+### Sécurité des clés
+
+- Les clés ne sont jamais dans le code ni dans l'historique Git : `.env` est ignoré par Git **et** par Docker (`.dockerignore`).
+- Elles restent côté serveur : le navigateur n'en voit aucune, et les erreurs renvoyées au client ne contiennent aucun détail interne.
+- Le sous-processus MCP est lancé **sans** les clés LLM (environnement minimal) : seul l'agent parle au modèle.
+- `/api/agent` est limité (par IP, plafond journalier, longueur des demandes, délai, 2 requêtes simultanées max) pour qu'un visiteur ne puisse pas vider votre crédit.
+- Recommandé : fixez aussi une **limite de dépense mensuelle** dans la console Anthropic (ou OpenAI). C'est le garde-fou ultime.
+
+> Sur l'offre gratuite de Render, le service s'endort après 15 min d'inactivité (premier chargement ~1 min) et `data/tickets.json` repart des 3 tickets d'exemple à chaque redémarrage. C'est voulu pour une démo.
 
 ## Tests
 

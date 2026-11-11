@@ -1,0 +1,15 @@
+# Jamais de secrets ni de donnees locales dans l'image
+.env
+.env.*
+!.env.example
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+data/tickets.json
+data/*.tmp
+api.log
+api.err.log
+tests

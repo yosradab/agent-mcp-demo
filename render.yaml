@@ -1,0 +1,22 @@
+# Blueprint Render : https://render.com/docs/blueprint-spec
+# Les cles API ne sont PAS dans ce fichier : "sync: false" fait que Render
+# vous les demande dans son tableau de bord, et les garde chiffrees cote serveur.
+services:
+  - type: web
+    name: agent-mcp-demo
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Garde-fous anti-abus de la demo publique (modifiables sans toucher au code)
+      - key: AGENT_RATE_PER_IP
+        value: "5"
+      - key: AGENT_RATE_WINDOW
+        value: "600"
+      - key: AGENT_DAILY_CAP
+        value: "100"
+      - key: AGENT_MAX_STEPS
+        value: "6"

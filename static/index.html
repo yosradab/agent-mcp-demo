@@ -17,7 +17,9 @@
           </div>
         </div>
         <div class="arch">
-          <span class="arch-layer">Frontend (web)</span>
+          <span class="arch-layer">Agent IA</span>
+          <span class="arrow">&#8594;</span>
+          <span class="arch-layer">Serveur MCP</span>
           <span class="arrow">&#8594;</span>
           <span class="arch-layer">API FastAPI</span>
           <span class="arrow">&#8594;</span>
@@ -33,6 +35,31 @@
         <div class="stat-card in-progress"><span class="stat-value" id="stat-inprogress">-</span><span class="stat-label">En cours</span></div>
         <div class="stat-card closed"><span class="stat-value" id="stat-closed">-</span><span class="stat-label">Fermes</span></div>
         <div class="stat-card neutral"><span class="stat-value" id="stat-high">-</span><span class="stat-label">Haute priorite</span></div>
+      </section>
+
+      <section class="panel agent" id="agent-panel">
+        <div class="agent-head">
+          <div>
+            <h2>Demandez a l'agent IA</h2>
+            <p class="muted">L'agent ne touche jamais l'API directement : il passe par les outils MCP. Chaque appel d'outil s'affiche ci-dessous.</p>
+          </div>
+          <span class="agent-pill" id="agent-pill">...</span>
+        </div>
+        <form class="agent-form" id="agent-form">
+          <label class="sr-only" for="agent-query">Votre demande</label>
+          <input id="agent-query" type="text" maxlength="500" autocomplete="off"
+                 placeholder="Ex. Quels tickets haute priorite sont encore ouverts ?">
+          <button class="btn-primary" id="agent-send" type="submit">Envoyer</button>
+        </form>
+        <div class="agent-examples" id="agent-examples">
+          <button type="button" class="chip">Resume les tickets ouverts</button>
+          <button type="button" class="chip">Cree un ticket : imprimante HS au 2e etage, priorite haute</button>
+          <button type="button" class="chip">Ferme le ticket 3</button>
+        </div>
+        <div class="agent-out hidden" id="agent-out">
+          <div class="agent-answer" id="agent-answer"></div>
+          <details class="agent-trace" id="agent-trace-wrap"><summary>Appels d'outils MCP</summary><pre id="agent-trace"></pre></details>
+        </div>
       </section>
 
       <section class="panel">

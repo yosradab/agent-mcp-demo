@@ -217,3 +217,55 @@ $("tbody").addEventListener("click", async (e) => {
 });
 
 refreshAll();
+/* ---------- Agent IA (POST /api/agent) ---------- */
+async function initAgent() {
+  const panel = $("agent-panel"), pill = $("agent-pill");
+  try {
+    const st = await api("/api/agent/status");
+    if (st.enabled) {
+      pill.textContent = `Agent en ligne (${st.provider === "anthropic" ? "Claude" : "GPT"})`;
+      pill.classList.add("on");
+    } else {
+      pill.textContent = "Agent desactive (pas de cle)";
+      panel.classList.add("disabled");
+    }
+  } catch (_) {
+    pill.textContent = "Agent indisponible";
+    panel.classList.add("disabled");
+  }
+}
+
+async function askAgent(query) {
+  const send = $("agent-send"), out = $("agent-out"), answer = $("agent-answer"), trace = $("agent-trace");
+  send.disabled = true;
+  send.textContent = "L'agent reflechit...";
+  out.classList.remove("hidden");
+  answer.className = "agent-answer";
+  answer.textContent = "...";
+  trace.textContent = "";
+  try {
+    const res = await api("/api/agent", { method: "POST", body: JSON.stringify({ query }) });
+    answer.textContent = res.answer;
+    trace.textContent = res.trace.length ? res.trace.join("\n") : "(aucun outil appele)";
+    refreshAll();
+  } catch (err) {
+    answer.textContent = err.message;
+    answer.className = "agent-answer error";
+  } finally {
+    send.disabled = false;
+    send.textContent = "Envoyer";
+  }
+}
+
+$("agent-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const q = $("agent-query").value.trim();
+  if (q.length >= 3) askAgent(q);
+});
+$("agent-examples").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  $("agent-query").value = chip.textContent;
+  askAgent(chip.textContent);
+});
+initAgent();

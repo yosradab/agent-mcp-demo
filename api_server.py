@@ -190,7 +190,103 @@ def ticket_stats() -> dict:
     return {"total": len(tickets), "by_status": by_status, "by_priority": by_priority}
 
 
+# ---------------------------------------------------------------------------
+# Agent IA en ligne : POST /api/agent
+#
+# Securite des cles :
+# - les cles LLM ne vivent que dans les variables d'environnement du serveur
+#   (jamais dans le code, jamais envoyees au navigateur) ;
+# - le sous-processus MCP est lance sans elles (voir agent.mcp_server_env) ;
+# - l'endpoint est limite (par IP + plafond journalier) pour qu'un visiteur ne
+#   puisse pas vider le credit API.
+# ---------------------------------------------------------------------------
+import asyncio  # noqa: E402
+import time  # noqa: E402
+from collections import deque  # noqa: E402
+
+from fastapi import Request  # noqa: E402
+
+AGENT_MAX_QUERY = int(os.getenv("AGENT_MAX_QUERY", "500"))
+AGENT_TIMEOUT = float(os.getenv("AGENT_TIMEOUT", "60"))
+AGENT_RATE_PER_IP = int(os.getenv("AGENT_RATE_PER_IP", "5"))          # requetes par fenetre et par IP
+AGENT_RATE_WINDOW = int(os.getenv("AGENT_RATE_WINDOW", "600"))        # fenetre en secondes (10 min)
+AGENT_DAILY_CAP = int(os.getenv("AGENT_DAILY_CAP", "100"))            # requetes par jour, tous visiteurs
+AGENT_CONCURRENCY = asyncio.Semaphore(int(os.getenv("AGENT_CONCURRENCY", "2")))
+
+_RATE: dict[str, deque] = {}
+_DAILY = {"day": "", "count": 0}
+_RATE_LOCK = threading.Lock()
+
+
+def _agent_provider() -> str | None:
+    if os.getenv("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    if os.getenv("OPENAI_API_KEY"):
+        return "openai"
+    return None
+
+
+def _client_ip(request: Request) -> str:
+    # Derriere le proxy de l'hebergeur, on prend la DERNIERE IP de X-Forwarded-For :
+    # c'est celle ajoutee par le proxy. La premiere peut etre inventee par le visiteur
+    # pour contourner la limite. (Le plafond journalier reste le garde-fou final.)
+    fwd = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+    return fwd[-1] if fwd else (request.client.host if request.client else "unknown")
+
+
+def _check_quota(ip: str) -> None:
+    now = time.time()
+    today = datetime.now(timezone.utc).date().isoformat()
+    with _RATE_LOCK:
+        if _DAILY["day"] != today:
+            _DAILY.update(day=today, count=0)
+        if _DAILY["count"] >= AGENT_DAILY_CAP:
+            raise HTTPException(status_code=429, detail="Quota journalier de la demo atteint. Revenez demain !")
+        hits = _RATE.setdefault(ip, deque())
+        while hits and now - hits[0] > AGENT_RATE_WINDOW:
+            hits.popleft()
+        if len(hits) >= AGENT_RATE_PER_IP:
+            wait = int(AGENT_RATE_WINDOW - (now - hits[0])) + 1
+            raise HTTPException(status_code=429, detail=f"Trop de demandes. Reessayez dans {wait} s.")
+        hits.append(now)
+        _DAILY["count"] += 1
+
+
+class AgentQuery(BaseModel):
+    query: str = Field(..., min_length=3, max_length=AGENT_MAX_QUERY)
+
+
+@app.get("/api/agent/status")
+def agent_status() -> dict:
+    provider = _agent_provider()
+    return {"enabled": provider is not None, "provider": provider, "max_query": AGENT_MAX_QUERY}
+
+
+@app.post("/api/agent")
+async def ask_agent(payload: AgentQuery, request: Request) -> dict:
+    if _agent_provider() is None:
+        raise HTTPException(status_code=503, detail="Agent IA desactive : aucune cle LLM configuree sur le serveur.")
+    _check_quota(_client_ip(request))
+
+    import agent  # import tardif : l'API reste utilisable sans les SDK LLM
+
+    trace: list[str] = []
+    try:
+        async with AGENT_CONCURRENCY:
+            answer = await asyncio.wait_for(agent.run_agent(payload.query.strip(), log=trace.append), AGENT_TIMEOUT)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="L'agent a mis trop de temps a repondre.")
+    except Exception as exc:  # jamais de details internes (ni de cle) vers le navigateur
+        print(f"[agent] erreur : {type(exc).__name__}", flush=True)
+        raise HTTPException(status_code=502, detail="L'agent a rencontre une erreur. Reessayez plus tard.")
+    return {"answer": answer, "trace": [t.strip() for t in trace][:40]}
+
+
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host=os.getenv("API_HOST", "127.0.0.1"), port=int(os.getenv("API_PORT", "8000")))
+    port = int(os.getenv("PORT") or os.getenv("API_PORT", "8000"))
+    # Le serveur MCP (sous-processus de l'agent) rappelle cette meme API en local.
+    os.environ.setdefault("API_BASE", f"http://127.0.0.1:{port}")
+    host = os.getenv("API_HOST", "0.0.0.0" if os.getenv("PORT") else "127.0.0.1")
+    uvicorn.run(app, host=host, port=port)
